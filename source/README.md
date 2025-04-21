@@ -1,86 +1,147 @@
-# Chat flow
-Chat flow is designed for conversational application development, building upon the capabilities of standard flow and providing enhanced support for chat inputs/outputs and chat history management. With chat flow, you can easily create a chatbot that handles chat input and output.
+CDC Pipeline: SQL Server → Debezium → Kafka → PySpark → MinIO
+This project demonstrates a Change Data Capture (CDC) pipeline where changes (INSERT, UPDATE, DELETE) from a SQL Server database are captured using Debezium, streamed through Kafka, processed in PySpark, and written to MinIO in Parquet format.
 
-## Create connection for LLM tool to use
-You can follow these steps to create a connection required by a LLM tool.
+Architecture:
 
-Currently, there are two connection types supported by LLM tool: "AzureOpenAI" and "OpenAI". If you want to use "AzureOpenAI" connection type, you need to create an Azure OpenAI service first. Please refer to [Azure OpenAI Service](https://azure.microsoft.com/en-us/products/cognitive-services/openai-service/) for more details. If you want to use "OpenAI" connection type, you need to create an OpenAI account first. Please refer to [OpenAI](https://platform.openai.com/) for more details.
++----------------+      +-----------+      +--------+      +------------+      +--------+
+| SQL Server DB  | ---> | Debezium  | ---> | Kafka  | ---> | PySpark    | ---> | MinIO  |
++----------------+      +-----------+      +--------+      +------------+      +--------+
+     (CDC Source)        (Change Logs)     (CDC Topic)     (CDC Handling)     (Parquet Storage)
 
-```bash
-# Override keys with --set to avoid yaml file changes
-# Create open ai connection
-pf connection create --file openai.yaml --set api_key=<your_api_key> --name open_ai_connection
+Components Used:
+SQL Server: Source database with CDC enabled.
 
-# Create azure open ai connection
-# pf connection create --file azure_openai.yaml --set api_key=<your_api_key> api_base=<your_api_base> --name open_ai_connection
-```
+Debezium: Monitors SQL Server for CDC events and publishes to Kafka.
 
-Note in [flow.dag.yaml](flow.dag.yaml) we are using connection named `open_ai_connection`.
-```bash
-# show registered connection
-pf connection show --name open_ai_connection
-```
-Please refer to connections [document](https://promptflow.azurewebsites.net/community/local/manage-connections.html) and [example](https://github.com/microsoft/promptflow/tree/main/examples/connections) for more details.
+Kafka: Message broker used for streaming CDC events.
 
-## Develop a chat flow
+PySpark: Processes Kafka CDC events and applies insert/update/delete logic.
 
-The most important elements that differentiate a chat flow from a standard flow are **Chat Input**, **Chat History**, and **Chat Output**.
+MinIO: S3-compatible object storage to hold final Parquet data.
 
-- **Chat Input**: Chat input refers to the messages or queries submitted by users to the chatbot. Effectively handling chat input is crucial for a successful conversation, as it involves understanding user intentions, extracting relevant information, and triggering appropriate responses.
+Prerequisites
+Docker Desktop (for local Kafka, Debezium, SQL Server, MinIO)
+Python 3.8+
+Java 8 or later
+Apache Spark (3.3 or later)
+Hadoop AWS packages for S3A support
+Kafka Python client (optional, for testing)
 
-- **Chat History**: Chat history is the record of all interactions between the user and the chatbot, including both user inputs and AI-generated outputs. Maintaining chat history is essential for keeping track of the conversation context and ensuring the AI can generate contextually relevant responses. Chat History is a special type of chat flow input, that stores chat messages in a structured format.
+Setup Instructions
+1. Start Required Services (SQL Server, Kafka, Debezium, MinIO)
+You can use Docker Compose or start each service individually.
 
-- **Chat Output**: Chat output refers to the AI-generated messages that are sent to the user in response to their inputs. Generating contextually appropriate and engaging chat outputs is vital for a positive user experience.
+Start MinIO:
+mkdir -p ~/minio/data
+docker run \
+   -p 9000:9000 \
+   -p 9001:9001 \
+   --name minio \
+   -v ~/minio/data:/data \
+   -e "MINIO_ROOT_USER=root" \
+   -e "MINIO_ROOT_PASSWORD=root" \
+   quay.io/minio/minio server /data --console-address ":9001"
+Access MinIO Console: http://localhost:9001
+Credentials: root / Test@2222
 
-A chat flow can have multiple inputs, but Chat History and Chat Input are required inputs in chat flow.
+Create a bucket (e.g., cdc-chnages).
 
-## Interact with chat flow
+2. Enable CDC in SQL Server
+Ensure CDC is enabled on the database and target tables:
 
-Promptflow CLI provides a way to start an interactive chat session for chat flow. Customer can use below command to start an interactive chat session:
+sql
+EXEC sys.sp_cdc_enable_db;
+EXEC sys.sp_cdc_enable_table  
+@source_schema = 'dbo',  
+@source_name   = 'chnages',  
+@role_name     = NULL;
 
-```
-pf flow test --flow <flow_folder> --interactive
-```
+3. Configure Debezium
+Start Debezium with Kafka and configure a connector for SQL Server. Sample connector config:
+{
+  "name": "sqlserver-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
+    "database.hostname": "sqlserver",
+    "database.port": "1433",
+    "database.user": "sa",
+    "database.password": "Passw0rd",
+    "database.dbname": "cdc",
+    "database.server.name": "sqlserver",
+    "table.include.list": "dbo.cdc-chnages",
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "schema-changes.sqlserver"
+  }
+}
 
-After executing this command, customer can interact with the chat flow in the terminal. Customer can press **Enter** to send the message to chat flow. And customer can quit with **ctrl+C**.
-Promptflow CLI will distinguish the output of different roles by color, <span style="color:Green">User input</span>, <span style="color:Gold">Bot output</span>, <span style="color:Blue">Flow script output</span>, <span style="color:Cyan">Node output</span>.
+4. PySpark Streaming CDC App
+Update and run the provided PySpark script:
 
-> =========================================<br>
-> Welcome to chat flow, <You-flow-name>.<br>
-> Press Enter to send your message.<br>
-> You can quit with ctrl+C.<br>
-> =========================================<br>
-> <span style="color:Green">User:</span> What types of container software there are<br>
-> <span style="color:Gold">Bot:</span> There are several types of container software available, including:<br>
-> 1. Docker: This is one of the most popular containerization software that allows developers to package their applications into containers and deploy them across different environments.<br>
-> 2. Kubernetes: This is an open-source container orchestration platform that automates the deployment, scaling, and management of containerized applications.<br>
->
-> <span style="color:Green">User:</span> What's the different between them<br>
-> <span style="color:Gold">Bot:</span> The main difference between the various container software systems is their functionality and purpose. Here are some key differences between them:<br>
-> 1. Docker is more focused on container packaging and deployment, while Kubernetes is more focused on container orchestration and management.<br>
-> 2. Kubernetes: Kubernetes is a container orchestration tool that helps manage and deploy containers at scale. It automates the deployment, scaling, and management of containerized applications across multiple hosts.<br>
+Kafka Config:
+.option("kafka.bootstrap.servers", "localhost:9092") \
+.option("subscribe", "cdc-topic")
 
-If customer adds "--verbose" in the pf command, the output of each step will be displayed.
+MinIO Config in Spark:
+.config("spark.hadoop.fs.s3a.endpoint", "http://localhost:9000") \
+.config("spark.hadoop.fs.s3a.access.key", "root") \
+.config("spark.hadoop.fs.s3a.secret.key", "root") \
+.config("spark.hadoop.fs.s3a.path.style.access", "true")
 
-> =========================================<br>
-> Welcome to chat flow, Template Chat Flow.<br>
-> Press Enter to send your message.<br>
-> You can quit with ctrl+C.<br>
-> =========================================<br>
-> <span style="color:Green">User:</span> What types of container software there are<br>
-> <span style="color:Cyan">chat:</span> There are several types of container software available, including:<br>
-> 1. Docker: A popular container platform that is widely used in the industry.<br>
-> 2. Kubernetes: A container orchestration tool that helps manage and deploy containers at scale.<br>
->
-> <span style="color:Gold">Bot:</span> There are several types of container software available, including:<br>
-> 1. Docker: A popular container platform that is widely used in the industry.<br>
-> 2. Kubernetes: A container orchestration tool that helps manage and deploy containers at scale.<br>
->
-> <span style="color:Green">User:</span> What's the different between them<br>
-> <span style="color:Cyan">chat:</span> The main differences between container software are in their architecture, feature sets, and use cases. Here are some brief explanations of the differences between the examples I listed:<br>
-> 1. Docker: Docker is a container platform that is widely used for building, packaging, and deploying containerized applications. It is known for its ease of use, portability, and large ecosystem of tools and services.<br>
-> 2. Kubernetes: Kubernetes is a container orchestration tool that helps manage and deploy containers at scale. It automates the deployment, scaling, and management of containerized applications across multiple hosts.<br>
->
-> <span style="color:Gold">Bot:</span> The main differences between container software are in their architecture, feature sets, and use cases. Here are some brief explanations of the differences between the examples I listed:<br>
-> 1. Docker: Docker is a container platform that is widely used for building, packaging, and deploying containerized applications. It is known for its ease of use, portability, and large ecosystem of tools and services.<br>
-> 2. Kubernetes: Kubernetes is a container orchestration tool that helps manage and deploy containers at scale. It automates the deployment, scaling, and management of containerized applications across multiple hosts.<br>
+Run the app:
+spark-submit --packages org.apache.hadoop:hadoop-aws:3.3.4 cdc_spark_app.py
+
+Output
+CDC events are processed and written to MinIO as Parquet files with UPSERT/DELETE logic applied.
+Navigate to your MinIO bucket to see the output under a folder raw.
+
+Data Handling Logic
+INSERT/UPDATE: Upsert into final state based on id (primary key).
+
+DELETE: Remove row with matching id from target data in MinIO.
+
+
+
+Resources
+Debezium SQL Server Connector
+
+Kafka + Spark Streaming Integration
+
+MinIO + Spark (S3A)
+
+
+Helpfull commands
+curl -X PUT -H "Content-Type: application/json" \                                                                                                 
+--data @debezium-sqlserver-connector-config.json \
+http://localhost:8083/connectors/sqlserver-connector/config
+
+
+
+curl -X DELETE http://localhost:8083/connectors/sqlserver-connector  
+
+curl -X PUT -H "Content-Type: application/json" \                                                                                                 
+--data @debezium-sqlserver-connector-config.json \
+http://localhost:8083/connectors/sqlserver-connector/config
+
+
+docker-compose -f sql-server/sql-server.yml up -d
+
+
+python source/kafka_process.py 
+
+
+
+Minio
+----
+
+
+mkdir -p ~/minio/data
+
+docker run \
+   -p 9000:9000 \
+   -p 9001:9001 \
+   --name minio \
+   -v ./data:/data \
+   -e "MINIO_ROOT_USER=root" \
+   -e "MINIO_ROOT_PASSWORD=root" \
+   quay.io/minio/minio server /data --console-address ":9001"
+
