@@ -28,7 +28,6 @@ minio_path = "s3a://cdc-chnages/raw/"
 # Define schema for CDC JSON payload
 # df = spark.createDataFrame([(1, "test")], ["id", "value"])
 # df.repartition(1).write.mode("overwrite").parquet(f"{minio_path}/test-data/")
-
 # Read stream from Kafka
 df_raw = spark.readStream \
     .format("kafka") \
