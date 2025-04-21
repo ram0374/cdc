@@ -41,24 +41,21 @@ docker run \
 
 
 Access the MinIO console at: http://localhost:9001
-Login with:
+-------
 
-Username: root
 
-Password: password
+##2. Create a bucket named cdc-data.
 
-Create a bucket named cdc-data.
-
-2. Enable CDC in SQL Server
+## 2. Enable CDC in SQL Server
 Enable CDC on your database and tables using the following SQL commands:
 EXEC sys.sp_cdc_enable_db;
 
 EXEC sys.sp_cdc_enable_table  
 @source_schema = 'dbo',  
-@source_name   = 'your_table_name',  
+@source_name   = 'cdc_changes',  
 @role_name     = NULL;
 
-3. Configure Debezium Connector
+##3. Configure Debezium Connector
 Create a Debezium connector for SQL Server with the following configuration:
 {
   "name": "sqlserver-connector",
@@ -68,16 +65,16 @@ Create a Debezium connector for SQL Server with the following configuration:
     "database.port": "1433",
     "database.user": "sa",
     "database.password": "YourStrong!Passw0rd",
-    "database.dbname": "your_database",
+    "database.dbname": "cdc",
     "database.server.name": "sqlserver",
-    "table.include.list": "dbo.your_table_name",
+    "table.include.list": "dbo.cdc_changes",
     "database.history.kafka.bootstrap.servers": "kafka:9092",
     "database.history.kafka.topic": "schema-changes.sqlserver"
   }
 }
 Post this configuration to the Debezium REST API (typically available at http://localhost:8083).
 
-4. Run PySpark CDC App
+##4. Run PySpark CDC App
 Make sure you have Hadoop AWS and necessary Spark configurations for S3A/MinIO.
 
 Example Spark job snippet:
@@ -105,7 +102,7 @@ df.writeStream \
     .start() \
     .awaitTermination()
 
-5. Handle Inserts, Updates, and Deletes
+##5. Handle Inserts, Updates, and Deletes
 Debezium CDC messages include an op field:
 
 c for create (insert)
@@ -139,7 +136,7 @@ Spark Structured Streaming with Kafka: https://spark.apache.org/docs/latest/stru
 MinIO with Spark: https://min.io/docs/minio/linux/integrations/apache-spark.html
 
 
-Helpfull-commands
+###Helpfull-commands
 
 curl -X PUT -H "Content-Type: application/json" \
 --data @debezium-sqlserver-connector-config.json
